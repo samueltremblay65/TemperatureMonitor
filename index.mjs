@@ -40,7 +40,7 @@ function verifyESP32(req, res, next) {
     console.log("deviceId: " + deviceId);
     console.log("secret: " + secret);
 
-    if (deviceId === EXPECTED_DEVICE_ID && secret === SHARED_SECRET) {
+    if (deviceId && secret === SHARED_SECRET) {
         req.deviceId = deviceId;
         console.log("Authenticated request : ESP32");
         return next();
@@ -54,6 +54,8 @@ app.get('/', (req, res) => {
 });
 
 app.get('/temperature', verifyESP32, (req, res) => {
+    console.log("Received request from: " + req.deviceId);
+    
     const temperature = req.query.temperature;
 
     if(temperature > high) console.log("ALERT: HIGH TEMPERATURE...");
