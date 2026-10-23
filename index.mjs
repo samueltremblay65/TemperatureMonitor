@@ -29,7 +29,8 @@ db.serialize(() => {
     )`);
 });
 
-let high = 27;
+let high = 25;
+let low = 20;
 
 function verifyESP32(req, res, next) {
     console.log("Authenticating request");
@@ -56,7 +57,6 @@ app.get('/temperature', verifyESP32, (req, res) => {
     const temperature = req.query.temperature;
 
     if(temperature > high) console.log("ALERT: HIGH TEMPERATURE...");
-
     if(temperature < low) console.log("ALERT: LOW TEMPERATURE...");
 
     // Insert Data in database
