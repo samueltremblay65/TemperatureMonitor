@@ -4,7 +4,8 @@
   "description": "Test server for smart shower project",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node --env-file=.env index.mjs",
+    "dev": "nodemon --exec \"node --env-file=.env\" index.mjs"
   },
   "keywords": [
     "test"
