@@ -31,10 +31,11 @@ db.serialize(() => {
     )`);
 });
 
-let high = 25;
-let low = 10;
+const HIGH_ALERT = 25;
+const LOW_ALERT = 10;
 
 let current = 20;
+let low = current;
 let data;
 
 let latestUpdate;
@@ -58,22 +59,67 @@ function verifyESP32(req, res, next) {
     return res.status(403).json({ error: 'Unauthorized device' });
 }
 
-app.get('/', (req, res) => {
-    console.log(data);
-    res.render('main', {temperature: current, data:data});
+app.get('/', (req, res) => {    
+    res.render('main', {temperature: current, low: low, data:data});
 });
 
 app.get('/current', (req, res) => {
     res.send({temperature: current});
 });
 
+app.get('/past24', (req, res) => {
+    let date = new Date();
+    date.setDate(date.getDate() - 1);
+    date.setMinutes(0, 0, 0);
+    const ms = date.getTime();
+    const query = `SELECT * FROM data WHERE timestamp >= ?`;
+    db.all(query, [Math.round(ms / 1000)], (err, rows) => {
+        if (err) {
+            return console.error(err.message);;
+        }
+        data = rows;
+        data.forEach(row => {
+            if(row.temperature < low) low = row.temperature;
+        });
+        console.log("Retrieved " + data.length + " data rows");
+        res.send(data);
+    });
+});
+
 app.get('/temperature', verifyESP32, (req, res) => {
-    const temperature = req.query.temperature;
+    const temperature = Number(req.query.temperature);
 
     current = temperature;
+    if(current < low) low = current;
 
-    if(temperature > high) console.log("ALERT: HIGH TEMPERATURE...");
-    if(temperature < low) console.log("ALERT: LOW TEMPERATURE...");
+    if(temperature > HIGH_ALERT) console.log("ALERT: HIGH TEMPERATURE...");
+    if(temperature < LOW_ALERT) console.log("ALERT: LOW TEMPERATURE...");
+
+    const date = new Date();
+    date.setMinutes(0,0,0);
+
+    if(date > latestUpdate) {
+        const insert = `INSERT INTO data (timestamp, temperature) VALUES (?, ?)`;
+        db.run(insert, [Math.round(date.getTime() / 1000), 22], function(err) {
+            if (err){
+                return console.error(err.message);
+            } 
+            console.log("Successfully pushed data to database");
+            latestUpdate = date;
+        });
+    }
+
+    res.sendStatus(200);
+});
+
+app.get('/backdoor', (req, res) => {
+    const temperature = Number(req.query.temperature);
+
+    current = temperature;
+    if(current < low) low = current;
+
+    if(temperature > HIGH_ALERT) console.log("ALERT: HIGH TEMPERATURE...");
+    if(temperature < LOW_ALERT) console.log("ALERT: LOW TEMPERATURE...");
 
     const date = new Date();
     date.setMinutes(0,0,0);
@@ -103,7 +149,11 @@ function getLast24Hours() {
             return console.error(err.message);;
         }
         data = rows;
+        data.forEach(row => {
+            if(row.temperature < low) low = row.temperature;
+        });
         console.log("Retrieved " + data.length + " data rows");
+        return data;
     });
 }
 

@@ -11,8 +11,8 @@ async function getTemperature(url) {
             throw new Error(`HTTP error! Status: ${response.status}`);
         }
 
-        const data = await response.json(); // Parses the JSON body
-        temperature = data.temperature;
+        const data = await response.json();
+        temperature = Number(data.temperature);
         update();
 
         return data;
@@ -24,8 +24,9 @@ async function getTemperature(url) {
 
 function setLow() {
     if(rows.length == 0) return;
+    
+    if(temperature < low) low = temperature;
 
-    let low = rows[0].temperature;
     rows.forEach(row => {
         if(row.temperature < low) low = row.temperature;
     });
@@ -34,9 +35,8 @@ function setLow() {
 
 function update() {
     tempDisplay.innerHTML = temperature + "°C";
+    setLow();
 }
-
-setLow();
 
 function generateLabels(mode) {
     if(mode == "day") return generateDayLabels();
@@ -45,9 +45,9 @@ function generateLabels(mode) {
 function generateDayLabels() {
     labels = [];
     let date = new Date();
-    date.setHours(date.getHours() - 23, 0, 0, 0);
+    date.setHours(date.getHours() - 24, 0, 0, 0);
 
-    for(let i = 0; i < 24; i++) {
+    for(let i = 0; i < 24 + 2; i++) {
         const hour12 = date.toLocaleString('en-US', { hour: 'numeric', hour12: true });
         labels.push(hour12);
         date.setHours(date.getHours() + 1);

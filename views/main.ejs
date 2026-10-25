@@ -13,12 +13,12 @@
     <div class="flex">
         <div class="number-container">
             <h2>Temperature</h2>
-            <h3 id="current">24°C</h3>
+            <h3 id="current"><%= temperature %>°C</h3>
         </div>
 
         <div class="number-container">
             <h2>Daily low</h2>
-            <h3 id="low">14°C</h3>
+            <h3 id="low"><%= low %>°C</h3>
         </div>
     </div>
 
@@ -31,6 +31,7 @@
 </body>
 <script>
     const rows = <%- JSON.stringify(data) %>;
+    let low = Number(<%- JSON.stringify(low) %>);
 </script>
 <script src="/main.js"></script>
 </html>
