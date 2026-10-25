@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cottage Temperature Monitor</title>
+    <link rel="stylesheet" href="/style.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.js"></script>
+    <link rel="icon" type="image/png" href="icon.png">                                                                                                                                   
+</head>
+<body>
+    <h1>Cottage Temperature Monitor</h1>
+    <div class="flex">
+        <div class="number-container">
+            <h2>Temperature</h2>
+            <h3 id="current">24°C</h3>
+        </div>
+
+        <div class="number-container">
+            <h2>Daily low</h2>
+            <h3 id="low">14°C</h3>
+        </div>
+    </div>
+
+    <div class="chart-container">
+        <h2>Hourly Temperatures</h2>
+        <canvas id="myLineChart"></canvas>
+        <p id="no_data">No data to show</p>
+    </div>
+
+</body>
+<script>
+    const rows = <%- JSON.stringify(data) %>;
+</script>
+<script src="/main.js"></script>
+</html>
