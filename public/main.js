@@ -58,7 +58,31 @@ function generateDayLabels() {
 }
 
 function generateData(mode) {
-    return data;
+    const temperatures = [];
+    let date = new Date();
+    date.setHours(date.getHours() - 23, 0, 0 , 0);
+
+    let i = 0;
+    while(i < data.length && temperatures.length < 24) {
+        const row = data[i];
+
+        const dataDate = new Date(row.timestamp);
+        console.log(dataDate.toLocaleString());
+        console.log(date.toLocaleString());
+        
+        if(row.timestamp == date.getTime()) {
+            temperatures.push(row.temperature);
+            i++;
+        }
+        else {
+            temperatures.push(null);
+        }
+
+        date.setHours(date.getHours() + 1);
+    }
+
+    console.log(temperatures);
+    return temperatures;
 }
 
 // Chart for past data
@@ -68,15 +92,7 @@ const container = document.getElementById('data-container');
 let data = [];
 
 rows.forEach(row => {
-    data.push(row.temperature);
-});
-
-let timestamps = [];
-
-rows.forEach(row => {
-    const date = new Date(row.timestamp * 1000);
-    timestamps.push(date.toLocaleString());
-    console.log(date.toLocaleString());
+    data.push({timestamp: row.timestamp * 1000, temperature: row.temperature});
 });
 
 if(data.length == 0) {
@@ -126,5 +142,9 @@ const TEMPERATURE_URL = "http://localhost:3000/current";
 setInterval(() => {
     console.log("Fetching temperature...");
     getTemperature(TEMPERATURE_URL);
+
+    // Set interval for refreshing last 24 hours
 }, 30000);
+
+
 

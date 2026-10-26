@@ -176,6 +176,7 @@ async function handleTemperature(req, res) {
 
             if (Number(result.rowsAffected) > 0) {
                 console.log('Successfully pushed data to database');
+                await getLast24Hours();
             } else {
                 console.log('A record for this hour already exists');
             }
@@ -311,3 +312,4 @@ try {
     console.error('Server initialization failed:', err);
     process.exit(1);
 }
+
