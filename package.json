@@ -13,8 +13,9 @@
   "author": "Samuel Tremblay",
   "license": "ISC",
   "dependencies": {
+    "@tursodatabase/serverless": "^1.4.1",
+    "dotenv": "^18.0.9",
     "ejs": "^7.0.2",
-    "express": "^4.18.2",
-    "sqlite3": "^5.1.7"
+    "express": "^4.18.2"
   }
 }

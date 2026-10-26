@@ -1,8 +1,10 @@
+
+import 'dotenv/config';
 import express from 'express';
-import sqlite3 from 'sqlite3';
+import { createClient } from '@tursodatabase/serverless/compat';
 
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { dirname } from 'node:path';
 
 const PORT = process.env.PORT || 3000;
 const SHARED_SECRET = process.env.ESP32_SHARED_SECRET;
@@ -17,18 +19,9 @@ const __dirname = dirname(__filename);
 
 app.use(express.static('public'));
 
-// Connect to database file (creates it if it doesn't exist)
-const db = new sqlite3.Database('./database.db', (err) => {
-    if (err) return console.error(err.message);
-    console.log('Connected to the SQLite database.');
-});
-
-db.serialize(() => {
-    db.run(`CREATE TABLE IF NOT EXISTS data (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        timestamp INTEGER,
-        temperature INTEGER
-    )`);
+const db = createClient({
+    url: process.env.TURSO_URL,
+    authToken: process.env.TURSO_TOKEN
 });
 
 const HIGH_ALERT = 25;
@@ -36,156 +29,285 @@ const LOW_ALERT = 10;
 
 let current = 20;
 let low = current;
-let data;
+let data = [];
+let latestUpdate = new Date(0);
 
-let latestUpdate;
+function getCurrentHour() {
+    const date = new Date();
+    date.setMinutes(0, 0, 0);
+    return date;
+}
 
-getLast24Hours();
+function updateLow() {
+    low = current;
+
+    for (const row of data) {
+        const temperature = Number(row.temperature);
+
+        if (Number.isFinite(temperature) && temperature < low) {
+            low = temperature;
+        }
+    }
+}
+
+async function initializeDatabase() {
+    await db.execute(`
+        CREATE TABLE IF NOT EXISTS data (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp INTEGER,
+            temperature INTEGER
+        )
+    `);
+
+    await db.execute(`
+        DELETE FROM data
+        WHERE id NOT IN (
+            SELECT MIN(id)
+            FROM data
+            GROUP BY timestamp
+        )
+    `);
+
+    await db.execute(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_data_timestamp
+        ON data(timestamp)
+    `);
+
+    const result = await db.execute(`
+        SELECT MAX(timestamp) AS latestTimestamp
+        FROM data
+    `);
+
+    const timestamp = result.rows[0].latestTimestamp;
+
+    if (timestamp !== null) {
+        latestUpdate = new Date(Number(timestamp) * 1000);
+    } else {
+        latestUpdate = new Date(0);
+    }
+
+    console.log('Connected to Turso database');
+
+    await getLast24Hours();
+}
 
 function verifyESP32(req, res, next) {
-    console.log("Authenticating request");
     const deviceId = req.get('X-Device-ID');
     const secret = req.get('X-ESP32-Secret');
 
-    if (deviceId === EXPECTED_DEVICE_ID && secret === SHARED_SECRET) {
+    if (
+        deviceId === EXPECTED_DEVICE_ID &&
+        secret === SHARED_SECRET
+    ) {
         req.deviceId = deviceId;
-        console.log("Authenticated request : ESP32");
         return next();
     }
-    else {
-        console.log("Unauthorized request was denied");
-    }
 
-    return res.status(403).json({ error: 'Unauthorized device' });
+    console.log('Unauthorized request was denied');
+
+    return res.status(403).json({
+        error: 'Unauthorized device'
+    });
 }
 
-app.get('/', (req, res) => {    
-    res.render('main', {temperature: current, low: low, data:data});
+app.get('/', (req, res) => {
+    console.log("Current: " + current);
+    console.log("Low: " + low);
+    console.log(data);
+    res.render('main', {
+        temperature: current,
+        low: low,
+        data: data
+    });
 });
 
 app.get('/current', (req, res) => {
-    res.send({temperature: current});
+    res.send({ temperature: current });
 });
 
-app.get('/past24', (req, res) => {
-    let date = new Date();
-    date.setDate(date.getDate() - 1);
-    date.setMinutes(0, 0, 0);
-    const ms = date.getTime();
-    const query = `SELECT * FROM data WHERE timestamp >= ?`;
-    db.all(query, [Math.round(ms / 1000)], (err, rows) => {
-        if (err) {
-            return console.error(err.message);;
-        }
-        data = rows;
-        data.forEach(row => {
-            if(row.temperature < low) low = row.temperature;
-        });
-        console.log("Retrieved " + data.length + " data rows");
-        res.send(data);
-    });
+app.get('/past24', async (req, res) => {
+    try {
+        const rows = await getLast24Hours();
+        res.send(rows);
+    } catch (err) {
+        console.error('Failed to retrieve past 24 hours:', err.message);
+        res.status(500).send('Database error');
+    }
 });
 
-app.get('/temperature', verifyESP32, (req, res) => {
-    const temperature = Number(req.query.temperature);
+app.get('/temperature', verifyESP32, handleTemperature);
+
+app.get('/backdoor', handleTemperature);
+
+async function handleTemperature(req, res) {
+    const rawTemperature = req.query.temperature;
+    const temperature = Number(rawTemperature);
+
+    if (
+        rawTemperature === undefined ||
+        rawTemperature.trim() === '' ||
+        !Number.isFinite(temperature)
+    ) {
+        return res.status(400).send('Invalid temperature');
+    }
 
     current = temperature;
-    if(current < low) low = current;
 
-    if(temperature > HIGH_ALERT) console.log("ALERT: HIGH TEMPERATURE...");
-    if(temperature < LOW_ALERT) console.log("ALERT: LOW TEMPERATURE...");
+    if (temperature > HIGH_ALERT) {
+        console.log('ALERT: HIGH TEMPERATURE...');
+    }
 
-    const date = new Date();
-    date.setMinutes(0,0,0);
+    if (temperature < LOW_ALERT) {
+        console.log('ALERT: LOW TEMPERATURE...');
+    }
 
-    if(date > latestUpdate) {
-        const insert = `INSERT INTO data (timestamp, temperature) VALUES (?, ?)`;
-        db.run(insert, [Math.round(date.getTime() / 1000), 22], function(err) {
-            if (err){
-                return console.error(err.message);
-            } 
-            console.log("Successfully pushed data to database");
+    const date = getCurrentHour();
+    const timestamp = Math.floor(date.getTime() / 1000);
+
+    if (date > latestUpdate) {
+        try {
+            const result = await db.execute({
+                sql: `
+                    INSERT OR IGNORE INTO data (timestamp, temperature)
+                    VALUES (?, ?)
+                `,
+                args: [timestamp, temperature]
+            });
+
+            if (Number(result.rowsAffected) > 0) {
+                console.log('Successfully pushed data to database');
+            } else {
+                console.log('A record for this hour already exists');
+            }
+
             latestUpdate = date;
-        });
+
+            await getLast24Hours();
+        } catch (err) {
+            console.error('Failed to save temperature:', err.message);
+            return res.status(500).send('Database error');
+        }
+    } else {
+        updateLow();
     }
 
     res.sendStatus(200);
-});
-
-app.get('/backdoor', (req, res) => {
-    const temperature = Number(req.query.temperature);
-
-    current = temperature;
-    if(current < low) low = current;
-
-    if(temperature > HIGH_ALERT) console.log("ALERT: HIGH TEMPERATURE...");
-    if(temperature < LOW_ALERT) console.log("ALERT: LOW TEMPERATURE...");
-
-    const date = new Date();
-    date.setMinutes(0,0,0);
-
-    if(date > latestUpdate) {
-        const insert = `INSERT INTO data (timestamp, temperature) VALUES (?, ?)`;
-        db.run(insert, [Math.round(date.getTime() / 1000), 22], function(err) {
-            if (err){
-                return console.error(err.message);
-            } 
-            console.log("Successfully pushed data to database");
-            latestUpdate = date;
-        });
-    }
-
-    res.sendStatus(200);
-});
-
-function getLast24Hours() {
-    let date = new Date();
-    date.setDate(date.getDate() - 1);
-    date.setMinutes(0, 0, 0);
-    const ms = date.getTime();
-    const query = `SELECT * FROM data WHERE timestamp >= ?`;
-    db.all(query, [Math.round(ms / 1000)], (err, rows) => {
-        if (err) {
-            return console.error(err.message);;
-        }
-        data = rows;
-        data.forEach(row => {
-            if(row.temperature < low) low = row.temperature;
-        });
-        console.log("Retrieved " + data.length + " data rows");
-        return data;
-    });
 }
 
-function populate() {
-    let date = new Date();
-    let now = new Date();
+async function getLast24Hours() {
+    const date = new Date();
+    date.setHours(date.getHours() - 23);
+    date.setMinutes(0, 0, 0);
 
-    let lastTemp = 20;
+    const cutoff = Math.floor(date.getTime() / 1000);
+
+    const result = await db.execute({
+        sql: `
+            SELECT *
+            FROM data
+            WHERE timestamp >= ?
+            ORDER BY timestamp ASC
+        `,
+        args: [cutoff]
+    });
+
+    data = result.rows.map(row => ({
+        id: row[0],
+        timestamp: row[1],
+        temperature: row[2]
+    }));
+
+    updateLow();
+
+    console.log(`Retrieved ${data.length} data rows`);
+
+    return data;
+}
+
+async function populate() {
+    const now = new Date();
+    const date = new Date(now);
 
     date.setDate(date.getDate() - 7);
     date.setMinutes(0, 0, 0);
 
-    const query = `INSERT INTO data (timestamp, temperature) VALUES (?, ?)`;
+    const query = `
+        INSERT OR IGNORE INTO data (timestamp, temperature)
+        VALUES (?, ?)
+    `;
 
-    while(date <= now) {
-        let temp = Math.round(lastTemp + Math.random() * 2 - 1);
-        db.run(query, [Math.round(date.getTime() / 1000), temp], function(err) {
-            if (err) return console.error(err.message);
-            console.log("Successfully pushed data to database");
+    while (date <= now) {
+        const temp = Math.round(20 + Math.random() * 2 - 1);
+
+        const result = await db.execute({
+            sql: query,
+            args: [
+                Math.floor(date.getTime() / 1000),
+                temp
+            ]
         });
+
+        if (Number(result.rowsAffected) > 0) {
+            console.log('Successfully inserted sample data');
+        }
+
         date.setHours(date.getHours() + 1);
     }
+
+    await refreshLatestUpdate();
+    await getLast24Hours();
 }
 
-function deleteAll() {
-    const query = `DELETE FROM data`;
-    db.run(query, function(err) {
-        if (err) return console.error(err.message);
-        console.log("Successfully deleted data table");
-    });
+async function refreshLatestUpdate() {
+    const result = await db.execute(`
+        SELECT MAX(timestamp) AS latestTimestamp
+        FROM data
+    `);
+
+    const timestamp = result.rows[0].latestTimestamp;
+
+    latestUpdate = timestamp !== null
+        ? new Date(Number(timestamp) * 1000)
+        : new Date(0);
 }
 
-app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server listening on http://0.0.0:${PORT}`);
+async function deleteAll() {
+    await db.execute('DELETE FROM data');
+
+    latestUpdate = new Date(0);
+    data = [];
+    updateLow();
+
+    console.log('Successfully deleted all data');
+}
+
+app.get('/populate', async (req, res) => {
+    try {
+        await populate();
+        res.send('Successfully populated database');
+    } catch (err) {
+        console.error('Failed to populate database:', err.message);
+        res.status(500).send('Failed to populate database');
+    }
 });
+
+app.get('/delete/table', async (req, res) => {
+    try {
+        await deleteAll();
+        res.send('Successfully deleted all data');
+    } catch (err) {
+        console.error('Failed to delete data:', err.message);
+        res.status(500).send('Failed to delete data');
+    }
+});
+
+try {
+    await initializeDatabase();
+
+    app.listen(PORT, '0.0.0.0', () => {
+        console.log(`Server listening on port ${PORT}`);
+    });
+} catch (err) {
+    console.error('Server initialization failed:', err);
+    process.exit(1);
+}

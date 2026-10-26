@@ -13,6 +13,7 @@ async function getTemperature(url) {
 
         const data = await response.json();
         temperature = Number(data.temperature);
+        console.log("Received reading: " + temperature);
         update();
 
         return data;
@@ -45,9 +46,9 @@ function generateLabels(mode) {
 function generateDayLabels() {
     labels = [];
     let date = new Date();
-    date.setHours(date.getHours() - 24, 0, 0, 0);
+    date.setHours(date.getHours() - 23, 0, 0, 0);
 
-    for(let i = 0; i < 24 + 2; i++) {
+    for(let i = 0; i < 24 + 3; i++) {
         const hour12 = date.toLocaleString('en-US', { hour: 'numeric', hour12: true });
         labels.push(hour12);
         date.setHours(date.getHours() + 1);
@@ -55,7 +56,6 @@ function generateDayLabels() {
 
     return labels;
 }
-
 
 function generateData(mode) {
     return data;
@@ -69,6 +69,14 @@ let data = [];
 
 rows.forEach(row => {
     data.push(row.temperature);
+});
+
+let timestamps = [];
+
+rows.forEach(row => {
+    const date = new Date(row.timestamp * 1000);
+    timestamps.push(date.toLocaleString());
+    console.log(date.toLocaleString());
 });
 
 if(data.length == 0) {
@@ -118,5 +126,5 @@ const TEMPERATURE_URL = "http://localhost:3000/current";
 setInterval(() => {
     console.log("Fetching temperature...");
     getTemperature(TEMPERATURE_URL);
-}, 10000);
+}, 30000);
 
