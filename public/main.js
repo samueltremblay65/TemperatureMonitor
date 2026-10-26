@@ -137,14 +137,14 @@ else {
     });
 }
 
-const TEMPERATURE_URL = "http://localhost:3000/current";
+const TEMPERATURE_URL = "https://temperaturemonitor.onrender.com/current";
 
 setInterval(() => {
     console.log("Fetching temperature...");
     getTemperature(TEMPERATURE_URL);
 
     // Set interval for refreshing last 24 hours
-}, 30000);
+}, 5000);
 
 
 
