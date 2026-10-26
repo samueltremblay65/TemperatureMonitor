@@ -3,8 +3,8 @@ body {
     max-width: 700px;
     margin: 40px auto;
     padding: 0 20px;
-    background: #8bb3a9;
-    color: #3a524e;
+    background: #88c2b5;
+    color: rgb(80, 114, 108);
 }
 
 .chart-container {
@@ -17,8 +17,10 @@ body {
 }
 
 .flex {
+    align-items: center;
     display: flex;
     gap: 20px;
+    align-items: center;
 }
 
 .number-container {
@@ -39,7 +41,8 @@ body {
 }
 
 h1 {
-    color: #152422;
+    font-size: x-large;
+    color: #5a8279;
 }
 
 h2 {
@@ -48,7 +51,19 @@ h2 {
 }
 
 h3 {
-    font-size: 100px;
+    font-size:xx-large;
     margin: 0;
     line-height: 1;
+}
+
+@media (min-width: 1024px) {
+  h3 {
+    font-size: 100px;
+  }
+}
+
+@media (min-width: 1024px) {
+  h1 {
+    font-size: xx-large;
+  }
 }
