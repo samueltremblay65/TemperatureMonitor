@@ -23,10 +23,11 @@ async function getTemperature(url) {
     }
 }
 
-function setLow() {
-    if(hourlyRows.length == 0) return;
-    
+function setLow() {    
+    if(low == null || low == undefined || low == "null") low = temperature;
     if(temperature < low) low = temperature;
+
+    if(hourlyRows.length == 0) return;
 
     hourlyRows.forEach(row => {
         if(row.temperature < low) low = row.temperature;
@@ -247,7 +248,9 @@ else {
     });
 }
 
-const TEMPERATURE_URL = "https://temperaturemonitor.onrender.com/current";
+const TEMPERATURE_URL = (debug != null && debug) ? 
+    "http://temperaturemonitor.onrender.com/current" : 
+    "https://temperaturemonitor.onrender.com/current";
 
 setInterval(() => {
     getTemperature(TEMPERATURE_URL);

@@ -41,7 +41,8 @@
 <script>
     const dailyRows = <%- JSON.stringify(dailyData) %>
     const hourlyRows = <%- JSON.stringify(hourlyData) %>
-    let low = Number(<%- JSON.stringify(low) %>);
+    let low = <%- JSON.stringify(low ?? null) %>;
+    const debug = Number(<%- JSON.stringify(debug) %>);
 </script>
 <script src="/main.js"></script>
 </html>

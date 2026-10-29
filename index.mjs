@@ -10,6 +10,7 @@ import { dirname } from 'node:path';
 const PORT = process.env.PORT || 3000;
 const SHARED_SECRET = process.env.ESP32_SHARED_SECRET;
 const EXPECTED_DEVICE_ID = process.env.EXPECTED_DEVICE_ID;
+const DEBUG = process.env.DEBUG === 'true'
 
 const app = express();
 
@@ -137,8 +138,8 @@ function verifyESP32(req, res, next) {
 }
 
 app.get('/', (req, res) => {
-    console.log(dailyData);
     res.render('main', {
+        debug: DEBUG,
         temperature: current,
         high, high,
         low: low,
@@ -342,8 +343,6 @@ async function getDailyData() {
         max_temperature: Number(row.max_temperature),
         avg_temperature: Number(row.avg_temperature),
     }));
-
-    return dailyData;
 }
 
 async function fillDailyData() {
@@ -354,7 +353,12 @@ async function fillDailyData() {
     `);
 
     const firstTimestamp = rangeResult.rows[0][0];
-    const lastTimestamp = rangeResult.rows[0][1];
+
+    const yesterday = new Date();
+    yesterday.setHours(0, 0, 0, 0);
+    yesterday.setDate(yesterday.getDate() - 1);
+
+    const lastTimestamp = Math.floor(yesterday.getTime() / 1000);
 
     if (firstTimestamp == null || lastTimestamp == null) {
         console.log('No hourly data to process');
@@ -375,8 +379,12 @@ async function fillDailyData() {
     const firstDate = new Date(Number(firstTimestamp) * 1000);
     firstDate.setHours(0, 0, 0, 0);
 
+    console.log("Filling daily data: first date: " + firstDate.getTime());
+
     const lastDate = new Date(Number(lastTimestamp) * 1000);
     lastDate.setHours(0, 0, 0, 0);
+
+    console.log("Filling daily data: last date: " + lastDate.getTime());
 
     // Process each calendar day.
     const date = new Date(firstDate);
@@ -440,6 +448,7 @@ async function fillDailyData() {
     console.log('Daily report generation complete');
 }
 
+// Maybe useful in future
 async function refreshLatestUpdate() {
     const result = await db.execute(`
         SELECT MAX(timestamp) AS latestTimestamp
@@ -477,6 +486,10 @@ app.get('/delete/table', async (req, res) => {
 try {
     await initializeDatabase();
     await fillDailyData();
+    await getDailyData();
+
+    current = hourlyData[hourlyData.length - 1].temperature;
+    updateExtremes();
 
     app.listen(PORT, '0.0.0.0', () => {
         console.log(`Server listening on port ${PORT}`);
