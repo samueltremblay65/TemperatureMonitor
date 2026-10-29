@@ -40,16 +40,13 @@ function update() {
     setLow();
 }
 
-function generateDailyLabels() {
+function generateDailyLabels(days) {
+    console.log(days);
     labels = [];
     const date = new Date();
-    date.setDate(date.getDate()- 30);
+    date.setDate(date.getDate() - days + 1);
 
-    const today = new Date();
-    today.setDate(today.getDate() + 3);
-    today.setHours(0, 0, 0, 0);
-
-    for(var i = 0; i < 33; i++) {
+    for(var i = 0; i < days; i++) {
         const formattedDate = date.toLocaleDateString('en-US', {
             month: 'short',
             day: 'numeric' 
@@ -109,24 +106,32 @@ function generateDailyData() {
 
     let i = 0;
 
+    let noData = true;
+
     for (let day = 0; day < 30; day++) {
         const timestamp = Math.floor(date.getTime() / 1000);
 
-        if (
-            i < dailyData.length &&
-            Number(dailyData[i].timestamp) === timestamp
-        ) {
+        if (i < dailyData.length && Number(dailyData[i].timestamp) === timestamp) {
+            noData = false;
             lows.push(dailyData[i].min_temperature);
             highs.push(dailyData[i].max_temperature);
             avgs.push(dailyData[i].avg_temperature);
             i++;
         } else {
-            lows.push(null);
-            highs.push(null);
-            avgs.push(null);
+            if(!noData) {
+                lows.push(null);
+                highs.push(null);
+                avgs.push(null);
+            }
         }
 
         date.setDate(date.getDate() + 1);
+    }
+
+    while(lows.length < 7) {
+        lows.unshift(null);
+        highs.unshift(null);
+        avgs.unshift(null);
     }
 
     return [lows, highs, avgs];
@@ -160,6 +165,7 @@ else {
             },
             options: {
             responsive: true,
+            maintainAspectRatio: false,
             
             plugins: {
                 legend: {
@@ -199,7 +205,7 @@ else {
     const dailyChart = new Chart(ctxDaily, {
         type: 'line',
         data: {
-            labels: generateDailyLabels(),
+            labels: generateDailyLabels(dailyTableData[0].length),
             datasets: [
                 {
                     label: 'High',
@@ -224,6 +230,7 @@ else {
             },
             options: {
             responsive: true,
+            maintainAspectRatio: false,
             
             plugins: {
                 legend: {
@@ -240,8 +247,8 @@ else {
                     }
                 },
                 y: {
-                    beginAtZero: true,
-                    suggestedMax: Math.max(...dailyTableData[1].filter(v => v !== null)) + 5
+                    suggestedMax: Math.max(...dailyTableData[1].filter(v => v !== null)) + 5,
+                    suggestedMin: Math.min(...dailyTableData[1].filter(v => v !== null)) - 5
                 }
             }
         }
