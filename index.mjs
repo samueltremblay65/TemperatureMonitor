@@ -2,6 +2,7 @@
 import 'dotenv/config';
 import express from 'express';
 import { createClient } from '@tursodatabase/serverless/compat';
+import cors from 'cors';
 
 import { fileURLToPath } from 'node:url';
 import { dirname } from 'node:path';
@@ -11,6 +12,13 @@ const SHARED_SECRET = process.env.ESP32_SHARED_SECRET;
 const EXPECTED_DEVICE_ID = process.env.EXPECTED_DEVICE_ID;
 
 const app = express();
+
+app.use(cors({
+    origin: [
+        'http://localhost:3000',
+        'https://temperaturemonitor.onrender.com/'
+    ]
+}));
 
 app.set('view engine', 'ejs');
 
@@ -27,9 +35,11 @@ const db = createClient({
 const HIGH_ALERT = 25;
 const LOW_ALERT = 10;
 
-let current = 20;
-let low = current;
-let data = [];
+let current;
+let low;
+let high;
+let hourlyData = [];
+let dailyData = [];
 let latestUpdate = new Date(0);
 
 function getCurrentHour() {
@@ -38,14 +48,19 @@ function getCurrentHour() {
     return date;
 }
 
-function updateLow() {
+function updateExtremes() {
     low = current;
+    high = current;
 
-    for (const row of data) {
+    for (const row of hourlyData) {
         const temperature = Number(row.temperature);
 
         if (Number.isFinite(temperature) && temperature < low) {
             low = temperature;
+        }
+
+        if (Number.isFinite(temperature) && temperature > high) {
+            high = temperature;
         }
     }
 }
@@ -56,6 +71,16 @@ async function initializeDatabase() {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             timestamp INTEGER,
             temperature INTEGER
+        )
+    `);
+
+    await db.execute(`
+        CREATE TABLE IF NOT EXISTS daily_reports (
+            timestamp INTEGER PRIMARY KEY,
+            min_temperature INTEGER,
+            max_temperature INTEGER,
+            avg_temperature REAL,
+            reading_count INTEGER
         )
     `);
 
@@ -88,7 +113,8 @@ async function initializeDatabase() {
 
     console.log('Connected to Turso database');
 
-    await getLast24Hours();
+    await getHourlyData();
+    await getDailyData();
 }
 
 function verifyESP32(req, res, next) {
@@ -111,13 +137,13 @@ function verifyESP32(req, res, next) {
 }
 
 app.get('/', (req, res) => {
-    console.log("Current: " + current);
-    console.log("Low: " + low);
-    console.log(data);
+    console.log(dailyData);
     res.render('main', {
         temperature: current,
+        high, high,
         low: low,
-        data: data
+        hourlyData: hourlyData,
+        dailyData: dailyData
     });
 });
 
@@ -125,12 +151,22 @@ app.get('/current', (req, res) => {
     res.send({ temperature: current });
 });
 
-app.get('/past24', async (req, res) => {
+app.get('/hourly', async (req, res) => {
     try {
-        const rows = await getLast24Hours();
+        const rows = await getHourlyData();
         res.send(rows);
     } catch (err) {
-        console.error('Failed to retrieve past 24 hours:', err.message);
+        console.error('Failed to retrieve hourly data:', err.message);
+        res.status(500).send('Database error');
+    }
+});
+
+app.get('/daily', async (req, res) => {
+    try {
+        const rows = await getDailyData();
+        res.send(rows);
+    } catch (err) {
+        console.error('Failed to retrieve daily data', err.message);
         res.status(500).send('Database error');
     }
 });
@@ -165,6 +201,8 @@ async function handleTemperature(req, res) {
     const timestamp = Math.floor(date.getTime() / 1000);
 
     if (date > latestUpdate) {
+        const previousDate = new Date(latestUpdate);
+
         try {
             const result = await db.execute({
                 sql: `
@@ -176,26 +214,82 @@ async function handleTemperature(req, res) {
 
             if (Number(result.rowsAffected) > 0) {
                 console.log('Successfully pushed data to database');
-                await getLast24Hours();
+                await getHourlyData();
+
+                if (
+                    latestUpdate.getTime() > 0 &&
+                    previousDate.toDateString() !== date.toDateString()
+                ) {
+                    await generateDailyReport(previousDate);
+                }
             } else {
                 console.log('A record for this hour already exists');
             }
 
             latestUpdate = date;
-
-            await getLast24Hours();
         } catch (err) {
             console.error('Failed to save temperature:', err.message);
             return res.status(500).send('Database error');
         }
     } else {
-        updateLow();
+        updateExtremes();
     }
 
     res.sendStatus(200);
 }
 
-async function getLast24Hours() {
+async function generateDailyReport(date) {
+    const start = new Date(date);
+    start.setHours(0, 0, 0, 0);
+
+    const end = new Date(start);
+    end.setDate(end.getDate() + 1);
+
+    const startTimestamp = Math.floor(start.getTime() / 1000);
+    const endTimestamp = Math.floor(end.getTime() / 1000);
+
+    const result = await db.execute({
+        sql: `
+            SELECT
+                MIN(temperature),
+                MAX(temperature),
+                AVG(temperature),
+                COUNT(*)
+            FROM data
+            WHERE timestamp >= ?
+              AND timestamp < ?
+        `,
+        args: [startTimestamp, endTimestamp]
+    });
+
+    const row = result.rows[0];
+
+    if (Number(row[3]) === 0) return;
+
+    await db.execute({
+        sql: `
+            INSERT OR IGNORE INTO daily_reports (
+                timestamp,
+                min_temperature,
+                max_temperature,
+                avg_temperature,
+                reading_count
+            )
+            VALUES (?, ?, ?, ?, ?)
+        `,
+        args: [
+            startTimestamp,
+            row[0],
+            row[1],
+            row[2],
+            row[3]
+        ]
+    });
+
+    console.log(`Generated daily report for ${start.toDateString()}`);
+}
+
+async function getHourlyData() {
     const date = new Date();
     date.setHours(date.getHours() - 23);
     date.setMinutes(0, 0, 0);
@@ -212,51 +306,138 @@ async function getLast24Hours() {
         args: [cutoff]
     });
 
-    data = result.rows.map(row => ({
+    hourlyData = result.rows.map(row => ({
         id: row[0],
         timestamp: row[1],
         temperature: row[2]
     }));
 
-    updateLow();
+    updateExtremes();
 
-    console.log(`Retrieved ${data.length} data rows`);
-
-    return data;
+    console.log(`Retrieved ${hourlyData.length} data rows`);
+    return hourlyData;
 }
 
-async function populate() {
-    const now = new Date();
-    const date = new Date(now);
+async function getDailyData() {
+    const cutoff = new Date();
+    cutoff.setHours(0, 0, 0, 0);
+    cutoff.setDate(cutoff.getDate() - 29);
 
-    date.setDate(date.getDate() - 7);
-    date.setMinutes(0, 0, 0);
+    const timestamp = Math.floor(cutoff.getTime() / 1000);
 
-    const query = `
-        INSERT OR IGNORE INTO data (timestamp, temperature)
-        VALUES (?, ?)
-    `;
+    const result = await db.execute({
+        sql: `
+            SELECT timestamp, min_temperature, max_temperature,
+                   avg_temperature, reading_count
+            FROM daily_reports
+            WHERE timestamp >= ?
+            ORDER BY timestamp ASC
+        `,
+        args: [timestamp]
+    });
 
-    while (date <= now) {
-        const temp = Math.round(20 + Math.random() * 2 - 1);
+    dailyData = result.rows.map(row => ({
+        timestamp: Number(row.timestamp),
+        min_temperature: Number(row.min_temperature),
+        max_temperature: Number(row.max_temperature),
+        avg_temperature: Number(row.avg_temperature),
+    }));
 
-        const result = await db.execute({
-            sql: query,
-            args: [
-                Math.floor(date.getTime() / 1000),
-                temp
-            ]
-        });
+    return dailyData;
+}
 
-        if (Number(result.rowsAffected) > 0) {
-            console.log('Successfully inserted sample data');
-        }
+async function fillDailyData() {
+    // Find the first and last timestamps in the hourly data.
+    const rangeResult = await db.execute(`
+        SELECT MIN(timestamp), MAX(timestamp)
+        FROM data
+    `);
 
-        date.setHours(date.getHours() + 1);
+    const firstTimestamp = rangeResult.rows[0][0];
+    const lastTimestamp = rangeResult.rows[0][1];
+
+    if (firstTimestamp == null || lastTimestamp == null) {
+        console.log('No hourly data to process');
+        return;
     }
 
-    await refreshLatestUpdate();
-    await getLast24Hours();
+    // Get all days that already have daily reports.
+    const reportsResult = await db.execute(`
+        SELECT timestamp
+        FROM daily_reports
+    `);
+
+    const existingDays = new Set(
+        reportsResult.rows.map(row => Number(row[0]))
+    );
+
+    // Find the first and last local calendar days containing data.
+    const firstDate = new Date(Number(firstTimestamp) * 1000);
+    firstDate.setHours(0, 0, 0, 0);
+
+    const lastDate = new Date(Number(lastTimestamp) * 1000);
+    lastDate.setHours(0, 0, 0, 0);
+
+    // Process each calendar day.
+    const date = new Date(firstDate);
+
+    while (date <= lastDate) {
+        const dayTimestamp = Math.floor(date.getTime() / 1000);
+
+        if (!existingDays.has(dayTimestamp)) {
+            const nextDate = new Date(date);
+            nextDate.setDate(nextDate.getDate() + 1);
+
+            const nextDayTimestamp =
+                Math.floor(nextDate.getTime() / 1000);
+
+            // Calculate statistics for this day in the database.
+            const result = await db.execute({
+                sql: `
+                    SELECT
+                        MIN(temperature),
+                        MAX(temperature),
+                        AVG(temperature),
+                        COUNT(*)
+                    FROM data
+                    WHERE timestamp >= ?
+                      AND timestamp < ?
+                `,
+                args: [dayTimestamp, nextDayTimestamp]
+            });
+
+            const row = result.rows[0];
+            const readingCount = Number(row[3]);
+
+            if (readingCount > 0) {
+                await db.execute({
+                    sql: `
+                        INSERT OR IGNORE INTO daily_reports (
+                            timestamp,
+                            min_temperature,
+                            max_temperature,
+                            avg_temperature,
+                            reading_count
+                        )
+                        VALUES (?, ?, ?, ?, ?)
+                    `,
+                    args: [
+                        dayTimestamp,
+                        row[0],
+                        row[1],
+                        row[2],
+                        readingCount
+                    ]
+                });
+
+                console.log(`Created daily report for ${date.toLocaleDateString()}`);
+            }
+        }
+
+        date.setDate(date.getDate() + 1);
+    }
+
+    console.log('Daily report generation complete');
 }
 
 async function refreshLatestUpdate() {
@@ -276,21 +457,12 @@ async function deleteAll() {
     await db.execute('DELETE FROM data');
 
     latestUpdate = new Date(0);
-    data = [];
-    updateLow();
+    hourlyData = [];
+    dailyData = [];
+    updateExtremes();
 
     console.log('Successfully deleted all data');
 }
-
-app.get('/populate', async (req, res) => {
-    try {
-        await populate();
-        res.send('Successfully populated database');
-    } catch (err) {
-        console.error('Failed to populate database:', err.message);
-        res.status(500).send('Failed to populate database');
-    }
-});
 
 app.get('/delete/table', async (req, res) => {
     try {
@@ -304,6 +476,7 @@ app.get('/delete/table', async (req, res) => {
 
 try {
     await initializeDatabase();
+    await fillDailyData();
 
     app.listen(PORT, '0.0.0.0', () => {
         console.log(`Server listening on port ${PORT}`);

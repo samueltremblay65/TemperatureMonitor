@@ -27,13 +27,20 @@
 
     <div class="chart-container">
         <h2>Hourly Temperatures</h2>
-        <canvas id="myLineChart"></canvas>
+        <canvas id="hourlyChart"></canvas>
+        <p id="no_data">No data to show</p>
+    </div>
+
+    <div class="chart-container">
+        <h2>Daily Temperatures</h2>
+        <canvas id="dailyChart"></canvas>
         <p id="no_data">No data to show</p>
     </div>
 
 </body>
 <script>
-    const rows = <%- JSON.stringify(data) %>;
+    const dailyRows = <%- JSON.stringify(dailyData) %>
+    const hourlyRows = <%- JSON.stringify(hourlyData) %>
     let low = Number(<%- JSON.stringify(low) %>);
 </script>
 <script src="/main.js"></script>

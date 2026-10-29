@@ -24,11 +24,11 @@ async function getTemperature(url) {
 }
 
 function setLow() {
-    if(rows.length == 0) return;
+    if(hourlyRows.length == 0) return;
     
     if(temperature < low) low = temperature;
 
-    rows.forEach(row => {
+    hourlyRows.forEach(row => {
         if(row.temperature < low) low = row.temperature;
     });
     lowDisplay.innerHTML = low + "°C";
@@ -39,11 +39,28 @@ function update() {
     setLow();
 }
 
-function generateLabels(mode) {
-    if(mode == "day") return generateDayLabels();
+function generateDailyLabels() {
+    labels = [];
+    const date = new Date();
+    date.setDate(date.getDate()- 30);
+
+    const today = new Date();
+    today.setDate(today.getDate() + 3);
+    today.setHours(0, 0, 0, 0);
+
+    for(var i = 0; i < 33; i++) {
+        const formattedDate = date.toLocaleDateString('en-US', {
+            month: 'short',
+            day: 'numeric' 
+        });
+        labels.push(formattedDate);
+        date.setDate(date.getDate() + 1);
+    }
+
+    return labels;
 }
 
-function generateDayLabels() {
+function generateHourlyLabels() {
     labels = [];
     let date = new Date();
     date.setHours(date.getHours() - 23, 0, 0, 0);
@@ -57,18 +74,14 @@ function generateDayLabels() {
     return labels;
 }
 
-function generateData(mode) {
+function generateHourlyData(data) {
     const temperatures = [];
     let date = new Date();
     date.setHours(date.getHours() - 23, 0, 0 , 0);
 
     let i = 0;
-    while(i < data.length && temperatures.length < 24) {
+    while(i < hourlyData.length && temperatures.length < 24) {
         const row = data[i];
-
-        const dataDate = new Date(row.timestamp);
-        console.log(dataDate.toLocaleString());
-        console.log(date.toLocaleString());
         
         if(row.timestamp == date.getTime()) {
             temperatures.push(row.temperature);
@@ -81,31 +94,62 @@ function generateData(mode) {
         date.setHours(date.getHours() + 1);
     }
 
-    console.log(temperatures);
     return temperatures;
 }
 
-// Chart for past data
-const ctx = document.getElementById('myLineChart').getContext('2d');
-const container = document.getElementById('data-container');
+function generateDailyData() {
+    const lows = [];
+    const highs = [];
+    const avgs = [];
 
-let data = [];
+    const date = new Date();
+    date.setDate(date.getDate() - 29);
+    date.setHours(0, 0, 0, 0);
 
-rows.forEach(row => {
-    data.push({timestamp: row.timestamp * 1000, temperature: row.temperature});
+    let i = 0;
+
+    for (let day = 0; day < 30; day++) {
+        const timestamp = Math.floor(date.getTime() / 1000);
+
+        if (
+            i < dailyData.length &&
+            Number(dailyData[i].timestamp) === timestamp
+        ) {
+            lows.push(dailyData[i].min_temperature);
+            highs.push(dailyData[i].max_temperature);
+            avgs.push(dailyData[i].avg_temperature);
+            i++;
+        } else {
+            lows.push(null);
+            highs.push(null);
+            avgs.push(null);
+        }
+
+        date.setDate(date.getDate() + 1);
+    }
+
+    return [lows, highs, avgs];
+}
+
+// Chart for hourly data
+const ctxHourly = document.getElementById('hourlyChart').getContext('2d');
+let hourlyData = [];
+
+hourlyRows.forEach(row => {
+    hourlyData.push({timestamp: row.timestamp * 1000, temperature: row.temperature});
 });
 
-if(data.length == 0) {
-    document.getElementById('myLineChart').style.display = "none";
+if(hourlyData.length == 0) {
+    document.getElementById('hourlyChart').style.display = "none";
     document.getElementById("no_data").style.display = "block";
 }
 else {
-    const myLineChart = new Chart(ctx, {
+    const hourlyChart = new Chart(ctxHourly, {
         type: 'line',
         data: {
-            labels: generateLabels("day"),
+            labels: generateHourlyLabels(),
             datasets: [{
-                    data: generateData("day"),
+                    data: generateHourlyData(hourlyData),
                     borderColor: '#379c88',
                     backgroundColor: 'rgba(59, 239, 179, 0.1)',
                     borderWidth: 2,
@@ -130,17 +174,82 @@ else {
                     }
                 },
                 y: {
-                    beginAtZero: true
+                    beginAtZero: true,
+                    suggestedMax: Math.max(...generateHourlyData(hourlyData).filter(v => v !== null)) + 5
                 }
             }
         }
     });
 }
 
-const TEMPERATURE_URL = "https://temperaturemonitor.onrender.com/current";
+const ctxDaily = document.getElementById('dailyChart').getContext('2d');
+let dailyData = [];
+
+dailyRows.forEach(row => {
+    dailyData.push(row);
+});
+
+if(dailyData.length == 0) {
+    document.getElementById('hourlyChart').style.display = "none";
+    document.getElementById("no_data").style.display = "block";
+}
+else {
+    const dailyTableData = generateDailyData();
+    const dailyChart = new Chart(ctxDaily, {
+        type: 'line',
+        data: {
+            labels: generateDailyLabels(),
+            datasets: [
+                {
+                    label: 'High',
+                    data: dailyTableData[1],
+                    borderColor: '#de7474',
+                    borderWidth: 2,
+                    fill: {
+                        target: 1,
+                        above: 'rgba(151, 229, 181, 0.27)'
+                    },
+                    tension: 0.3
+                },
+                {
+                    label: 'Low',
+                    data: dailyTableData[0],
+                    borderColor: '#7be8d2',
+                    borderWidth: 2,
+                    fill: false,
+                    tension: 0.3
+                }
+            ]
+            },
+            options: {
+            responsive: true,
+            
+            plugins: {
+                legend: {
+                    display: true,
+                    position: 'bottom'
+                }
+            },
+            scales: {
+                x: {
+                    ticks: {
+                        autoSkip: true,
+                        maxRotation: 0,
+                        minRotation: 0
+                    }
+                },
+                y: {
+                    beginAtZero: true,
+                    suggestedMax: Math.max(...dailyTableData[1].filter(v => v !== null)) + 5
+                }
+            }
+        }
+    });
+}
+
+const TEMPERATURE_URL = "http://localhost:3000/current";
 
 setInterval(() => {
-    console.log("Fetching temperature...");
     getTemperature(TEMPERATURE_URL);
 
     // Set interval for refreshing last 24 hours
