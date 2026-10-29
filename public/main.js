@@ -247,7 +247,7 @@ else {
     });
 }
 
-const TEMPERATURE_URL = "https://temperaturemonitor.onrender.com//current";
+const TEMPERATURE_URL = "https://temperaturemonitor.onrender.com/current";
 
 setInterval(() => {
     getTemperature(TEMPERATURE_URL);
