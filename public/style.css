@@ -29,7 +29,8 @@ body {
 }
 
 .number-container {
-    flex-grow: 1;
+    flex: 1;
+    min-width: 0;
     background: #ffffff;
     padding: 24px;
     border-radius: 12px;

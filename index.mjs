@@ -217,11 +217,9 @@ async function handleTemperature(req, res) {
                 console.log('Successfully pushed data to database');
                 await getHourlyData();
 
-                if (
-                    latestUpdate.getTime() > 0 &&
-                    previousDate.toDateString() !== date.toDateString()
-                ) {
+                if (latestUpdate.getTime() > 0 && previousDate.toDateString() !== date.toDateString()) {
                     await generateDailyReport(previousDate);
+                    getDailyData();
                 }
             } else {
                 console.log('A record for this hour already exists');
