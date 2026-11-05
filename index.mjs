@@ -3,9 +3,11 @@ import 'dotenv/config';
 import express from 'express';
 import { createClient } from '@tursodatabase/serverless/compat';
 import cors from 'cors';
+import nodemailer from 'nodemailer'
 
 import { fileURLToPath } from 'node:url';
 import { dirname } from 'node:path';
+import { time } from 'node:console';
 
 const PORT = process.env.PORT || 3000;
 const SHARED_SECRET = process.env.ESP32_SHARED_SECRET;
@@ -33,7 +35,7 @@ const db = createClient({
     authToken: process.env.TURSO_TOKEN
 });
 
-const HIGH_ALERT = 25;
+const HIGH_ALERT = 18;
 const LOW_ALERT = 10;
 
 let current;
@@ -42,6 +44,7 @@ let high;
 let hourlyData = [];
 let dailyData = [];
 let latestUpdate = new Date(0);
+let latestEmailUpdate; // {time: time, type: "low/high", temperature: temperature}
 
 function getCurrentHour() {
     const date = new Date();
@@ -50,8 +53,11 @@ function getCurrentHour() {
 }
 
 function updateExtremes() {
-    low = current;
-    high = current;
+    if(low == null) low = current;
+    if(high == null) high = current;
+
+    if(current < low) low = current;
+    if(current > high) high = current;
 
     for (const row of hourlyData) {
         const temperature = Number(row.temperature);
@@ -137,6 +143,53 @@ function verifyESP32(req, res, next) {
     });
 }
 
+async function sendEmailWarning(temperature) {
+    const recipient = process.env.RECIPIENT_ADDRESS;
+    const message = `<p>AUTOMATIC ALERT: The current temperature is ${temperature}°C.</p>`;
+    let subject;
+    let type;
+    let timestamp = Math.round(new Date().getTime());
+
+    const link = '<p>Visit <a href="https://temperaturemonitor.onrender.com/current">Cottage Temperature Monitor</a> for more details.</p>'
+
+    if(temperature < LOW_ALERT) {
+        subject = "Low Temperature Alert";
+        type = "low";
+    }
+    else if (temperature > HIGH_ALERT) {
+        subject = "High Temperature Alert";
+        type = "high";
+    }
+
+    const transporter = nodemailer.createTransport({
+        host: process.env.SMTP_HOST,
+        port: Number(process.env.SMTP_PORT),
+        secure: true,
+        auth: {
+            user: process.env.MAIL_ADDRESS,
+            pass: process.env.MAIL_PASSWORD
+        }
+    });
+
+    try {
+        await transporter.verify();
+        console.log('SMTP connection successful!');
+
+        await transporter.sendMail({
+            from: `Temperature Monitor <${process.env.MAIL_ADDRESS}>`,
+            to: recipient,
+            subject: subject,
+            html: message + link
+        });
+
+        console.log('Email sent successfully to ' + recipient);
+        latestEmailUpdate = {time: Math.round(new Date().getTime()), type: type, temperature: temperature};
+        console.log(latestEmailUpdate);
+    } catch (error) {
+        console.error('Error sending email:', error);
+    }
+}
+
 app.get('/', (req, res) => {
     res.render('main', {
         debug: DEBUG,
@@ -189,13 +242,15 @@ async function handleTemperature(req, res) {
     }
 
     current = temperature;
+    updateExtremes();
 
-    if (temperature > HIGH_ALERT) {
-        console.log('ALERT: HIGH TEMPERATURE...');
-    }
-
-    if (temperature < LOW_ALERT) {
-        console.log('ALERT: LOW TEMPERATURE...');
+    if (temperature < LOW_ALERT || temperature > HIGH_ALERT) {
+        if(latestEmailUpdate == null) {
+            sendEmailWarning(temperature);
+        }
+        else if(isMoreExtreme(temperature, latestEmailUpdate.temperature) || isDifferentExtreme(temperature, latestEmailUpdate.temperature)) {
+            sendEmailWarning(temperature);
+        }
     }
 
     const date = getCurrentHour();
@@ -230,11 +285,21 @@ async function handleTemperature(req, res) {
             console.error('Failed to save temperature:', err.message);
             return res.status(500).send('Database error');
         }
-    } else {
-        updateExtremes();
     }
 
     res.sendStatus(200);
+}
+
+function isMoreExtreme(next, previous) {
+    if(previous < LOW_ALERT && next < previous) return true;
+    if(previous > HIGH_ALERT && next > previous) return true;
+    return false;
+}
+
+function isDifferentExtreme(next, previous) {
+    if(previous < LOW_ALERT && next > HIGH_ALERT) return true;
+    if(previous > HIGH_ALERT && next < LOW_ALERT) return true;
+    return false;
 }
 
 async function generateDailyReport(date) {
