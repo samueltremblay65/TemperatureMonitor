@@ -7,7 +7,6 @@ import nodemailer from 'nodemailer'
 
 import { fileURLToPath } from 'node:url';
 import { dirname } from 'node:path';
-import { time } from 'node:console';
 
 const PORT = process.env.PORT || 3000;
 const SHARED_SECRET = process.env.ESP32_SHARED_SECRET;
