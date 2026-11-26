@@ -224,9 +224,14 @@ app.get('/daily', async (req, res) => {
     }
 });
 
-app.get('/temperature', verifyESP32, handleTemperature);
+app.get('/solar', verifyESP32, handleSolarData);
 
-app.get('/backdoor', handleTemperature);
+async function handleSolarData(req, res) {
+    console.log(req.json);
+    res.sendStatus(200);
+}
+
+app.get('/temperature', verifyESP32, handleTemperature);
 
 async function handleTemperature(req, res) {
     const rawTemperature = req.query.temperature;
@@ -534,16 +539,6 @@ async function deleteAll() {
 
     console.log('Successfully deleted all data');
 }
-
-app.get('/delete/table', async (req, res) => {
-    try {
-        await deleteAll();
-        res.send('Successfully deleted all data');
-    } catch (err) {
-        console.error('Failed to delete data:', err.message);
-        res.status(500).send('Failed to delete data');
-    }
-});
 
 try {
     await initializeDatabase();
