@@ -256,7 +256,7 @@ else {
 }
 
 const TEMPERATURE_URL = (debug != null && debug) ? 
-    "http://temperaturemonitor.onrender.com/current" : 
+    "http://localhost:3000/current" : 
     "https://temperaturemonitor.onrender.com/current";
 
 setInterval(() => {
